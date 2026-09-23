@@ -1,0 +1,89 @@
+{
+  "package_format": "tin-workflow-package-v1",
+  "definition": {
+    "key": "growth.support_search_gap",
+    "title": "Find support/search demand gaps",
+    "description": "Join Search Console query demand with support-inbox topic volume to surface content gaps that have both real search interest and real ticket volume, reported as a demand correlation, never a causal claim.",
+    "version": "1.0.0",
+    "executor": "workflow.code",
+    "schedule_modes": ["on_demand"],
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_id": { "type": "string", "format": "uuid" },
+        "lookback_days": {
+          "type": "integer",
+          "minimum": 7,
+          "maximum": 90,
+          "default": 28,
+          "title": "Search Console lookback window (days)",
+          "x-tin-ui": { "control": "number", "order": 10 }
+        },
+        "row_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6,
+          "default": 4,
+          "title": "Top queries to check",
+          "description": "Ranked by impressions among the pulled Search Console queries. Also bounds the Gmail search calls, one per query. The default stays below the maximum of 6 so an out-of-the-box run (1 GSC call + up to 6 sequential Gmail calls + 1 model call) comfortably fits the workflow's 60-second execution window; raise it toward 6 only once you've confirmed a run finishes with room to spare.",
+          "x-tin-ui": { "control": "number", "order": 20 }
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["normal", "moneyball"],
+          "default": "normal",
+          "title": "Report style",
+          "description": "Moneyball: the table only, no prose. Normal: the table plus one caveated correlation sentence per row that clears the gate.",
+          "x-tin-ui": { "control": "select", "order": 30 }
+        }
+      },
+      "required": ["project_id"]
+    },
+    "integration_requirements": [
+      {
+        "provider_key": "analytics.gsc",
+        "capabilities": ["search_analytics.read"],
+        "required": true
+      },
+      {
+        "provider_key": "workspace.google",
+        "capabilities": ["gmail.messages.read"],
+        "required": true
+      }
+    ],
+    "code": {
+      "runtime": "python3.12.8-stdlib-v1",
+      "entrypoint": "main.py",
+      "files": ["main.py"],
+      "timeout_seconds": 60,
+      "services": {
+        "gsc": {
+          "provider_key": "analytics.gsc",
+          "max_calls": 1,
+          "max_response_bytes": 32000
+        },
+        "gmail": {
+          "provider_key": "workspace.google",
+          "max_calls": 6,
+          "max_response_bytes": 4096
+        }
+      },
+      "model_routes": {
+        "derive_phrases": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "max_calls": 1,
+          "max_input_bytes": 4096,
+          "max_output_tokens": 512
+        }
+      },
+      "output": {
+        "kind": "project.artifact",
+        "path": "reports/SUPPORT_SEARCH_GAP.md",
+        "media_type": "text/markdown",
+        "max_bytes": 8000
+      }
+    }
+  }
+}
