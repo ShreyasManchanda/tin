@@ -119,7 +119,7 @@ async def test_rows_above_both_thresholds_clear_the_gate_in_normal_mode():
     module, _ = load()
     context, service_calls, model_calls, spec = make_context(
         gsc_rows=[gsc_row("export my data csv", 500), gsc_row("cancel my plan", 40)],
-        gmail_estimates=[12, 1],
+        gmail_estimates=[12, 0],
     )
     result = await module.run(context, {"lookback_days": 28, "row_limit": 5, "mode": "normal"})
     validate_code_result(json.dumps(result).encode(), spec)
@@ -131,6 +131,30 @@ async def test_rows_above_both_thresholds_clear_the_gate_in_normal_mode():
     steps = [c["step"] for c in service_calls]
     assert steps == ["gsc_query_pull", "gmail_search_0", "gmail_search_1"]
     assert model_calls[0]["step"] == "derive_gmail_phrases"
+
+
+async def test_a_single_gmail_match_clears_the_gate_with_an_explicit_low_count_caveat():
+    module, _ = load()
+    context, *_ = make_context(
+        gsc_rows=[gsc_row("export my data csv", 500)],
+        gmail_estimates=[1],
+    )
+    result = await module.run(context, {"lookback_days": 28, "row_limit": 5, "mode": "normal"})
+    content = result["content"]
+    assert "content gap" in content and "~1 message matching" in content
+    assert "treat it as a single data point, not a pattern" in content
+
+
+async def test_a_gmail_match_at_or_above_the_low_count_bound_omits_the_caveat():
+    module, _ = load()
+    context, *_ = make_context(
+        gsc_rows=[gsc_row("export my data csv", 500)],
+        gmail_estimates=[3],
+    )
+    result = await module.run(context, {"lookback_days": 28, "row_limit": 5, "mode": "normal"})
+    content = result["content"]
+    assert "content gap" in content and "~3 messages matching" in content
+    assert "single data point" not in content
 
 
 async def test_moneyball_mode_emits_only_the_table():

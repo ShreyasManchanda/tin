@@ -11,8 +11,17 @@ from datetime import datetime, timedelta
 # product.analytics_brief/skills/product-analytics/STATISTICS.md is the same
 # idea applied to a different signal: pick a bound that keeps a screening
 # result honest, then say "insufficient data" below it instead of a shaky claim.
+#
+# The Gmail floor is deliberately presence-based (>=1), not volume-based.
+# Most projects on Tin are small enough that a support inbox will rarely get
+# several independent emails about one narrow topic inside one lookback
+# window, even when the underlying correlation is real -- a volume floor
+# would silently fail the workflow for exactly the founders it's meant for.
+# One independently-mentioned email, paired with real search demand, is
+# weaker evidence than several would be, and the report says so; it is not
+# stretched into a stronger claim to compensate.
 MIN_GSC_IMPRESSIONS = 10
-MIN_GMAIL_RESULT_ESTIMATE = 3
+MIN_GMAIL_RESULT_ESTIMATE = 1
 
 # One Search Console call asks for this many rows; the service binding's
 # max_response_bytes clamps what actually comes back. Python then ranks the
@@ -120,6 +129,27 @@ def _table(rows):
     return lines
 
 
+# Below this, a cleared row still gets its caveated sentence, but with an
+# explicit weaker-evidence note -- a presence-based floor (see
+# MIN_GMAIL_RESULT_ESTIMATE above) means a "content gap" can rest on a single
+# email, and the language should not read the same as a higher-volume row.
+LOW_COUNT_CAVEAT_BELOW = 3
+
+
+def _finding_sentence(row):
+    estimate = row["gmail_estimate"]
+    unit = "message" if estimate == 1 else "messages"
+    sentence = (
+        f'- "{_cell(row["query"])}" draws {row["gsc_impressions"]} Search Console impressions '
+        f"and coincides with an independent Gmail signal (~{estimate} {unit} matching "
+        f'"{_cell(row["gmail_phrase"])}") -- a demand correlation, not evidence that either '
+        "caused the other."
+    )
+    if estimate < LOW_COUNT_CAVEAT_BELOW:
+        sentence += " At this count, treat it as a single data point, not a pattern."
+    return sentence
+
+
 def _render(mode, start_date, end_date, rows):
     if mode == "moneyball":
         return "\n".join(_table(rows)) + "\n"
@@ -135,13 +165,7 @@ def _render(mode, start_date, end_date, rows):
     if cleared:
         lines.append("## Findings")
         lines.append("")
-        lines += [
-            f'- "{_cell(r["query"])}" draws {r["gsc_impressions"]} Search Console impressions '
-            f"and coincides with an independent Gmail signal (~{r['gmail_estimate']} messages "
-            f'matching "{_cell(r["gmail_phrase"])}") -- a demand correlation, not evidence that '
-            "either caused the other."
-            for r in cleared
-        ]
+        lines += [_finding_sentence(r) for r in cleared]
     elif rows:
         lines.append("No row cleared both thresholds; no correlation claim is supported.")
     else:
